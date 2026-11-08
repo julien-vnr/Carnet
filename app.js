@@ -569,7 +569,7 @@ async function importStrava(file) {
     });
     const keys = Object.keys(items).sort((a, b) => items[a].date < items[b].date ? -1 : 1);
     let pruned = 0;
-    while (keys.length && JSON.stringify(items).length > 230000) { delete items[keys.shift()]; pruned++; }
+    while (keys.length && JSON.stringify(items).length > 3000000) { delete items[keys.shift()]; pruned++; }
     await Store.putDoc('strava', { ...Store.data.strava, items, lastImport: Date.now() });
     Imp.msg = `${acts.length} activités lues, ${added} nouvelle${added > 1 ? 's' : ''} ajoutée${added > 1 ? 's' : ''}.` + (pruned ? ` Les ${pruned} plus anciennes ont été laissées de côté pour rester sous la taille maximale.` : '');
     toast(added ? `${added} activité${added > 1 ? 's' : ''} Strava ajoutée${added > 1 ? 's' : ''}.` : 'Déjà à jour : aucune nouvelle activité.');
