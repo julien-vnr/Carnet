@@ -46,21 +46,21 @@ const CATS = {
   libre: { label: 'Libre', c: 'var(--plate-chrome)' },
 };
 const TEMPLATES = [
-  { id: 'force_pecs', day: 'Lun', title: 'Pecs · Triceps', cat: 'force', ex: [
+  { id: 'force_pecs', duree: 75, day: 'Lun', title: 'Pecs · Triceps', cat: 'force', ex: [
     ['Développé couché', 'charge', 5], ['Développé incliné haltères', 'charge', 3], ['Dips', 'pdc', 3],
     ['Écarté poulie vis-à-vis', 'charge', 3], ['Barre au front', 'charge', 3], ['Extension triceps poulie', 'charge', 3]] },
-  { id: 'dos_bras', day: 'Mar', title: 'Dos · Biceps · Avant-bras', cat: 'force', ex: [
+  { id: 'dos_bras', duree: 75, day: 'Mar', title: 'Dos · Biceps · Avant-bras', cat: 'force', ex: [
     ['Tractions', 'pdc', 4], ['Rowing barre', 'charge', 4], ['Tirage vertical', 'charge', 3], ['Rowing haltère', 'charge', 3],
     ['Curl barre', 'charge', 3], ['Curl marteau', 'charge', 3], ['Curl poignets (avant-bras)', 'charge', 3]] },
-  { id: 'sprint', day: 'Mer', title: 'Sprint', note: '15 min', cat: 'sprint', ex: [
+  { id: 'sprint', duree: 15, day: 'Mer', title: 'Sprint', note: '15 min', cat: 'sprint', ex: [
     ['Sprint 10 m', 'sprint', 4], ['Sprint 20 m', 'sprint', 3], ['Sprint 30 m', 'sprint', 3], ['Sprint 40 m', 'sprint', 2]] },
-  { id: 'sprint_complet', day: 'Mer', title: 'Sprint complet', note: '30 min', cat: 'sprint', ex: [
+  { id: 'sprint_complet', duree: 30, day: 'Mer', title: 'Sprint complet', note: '30 min', cat: 'sprint', ex: [
     ['Sauts groupés', 'pdc', 3], ['Foulées bondissantes 20 m', 'sprint', 2], ['Sprint 10 m', 'sprint', 4], ['Sprint 20 m', 'sprint', 3],
     ['Sprint 30 m', 'sprint', 3], ['Sprint 40 m', 'sprint', 2], ['Sprint 20 m lancé', 'sprint', 2]] },
-  { id: 'hypertrophie', day: 'Ven', title: 'Pecs · Épaules · Dos · Biceps', cat: 'hyper', ex: [
+  { id: 'hypertrophie', duree: 75, day: 'Ven', title: 'Pecs · Épaules · Dos · Biceps', cat: 'hyper', ex: [
     ['Développé couché haltères', 'charge', 4], ['Développé militaire haltères', 'charge', 4], ['Élévations latérales', 'charge', 4],
     ['Tirage horizontal', 'charge', 4], ['Pec deck', 'charge', 3], ['Curl incliné haltères', 'charge', 3]] },
-  { id: 'libre', day: null, title: 'Séance libre', cat: 'libre', ex: [] },
+  { id: 'libre', duree: 60, day: null, title: 'Séance libre', cat: 'libre', ex: [] },
 ];
 const TPL = Object.fromEntries(TEMPLATES.map(t => [t.id, t]));
 // getDay() : 0 = dimanche
@@ -222,11 +222,60 @@ function sessionStats(s) {
   }));
   return { ex: (s.exercises || []).length, sets, ton, dist };
 }
+/* ---------- Calories (estimations) ----------
+   Méthode : MET du Compendium des activités physiques 2024 → kcal = MET × 3,5 × poids(kg) / 200 × minutes.
+   Course : équation ACSM (0,2 ml/kg/m à plat + 0,9 × dénivelé) → environ 1 kcal par kg et par km.
+   « Actives » = total − métabolisme de repos (Mifflin-St Jeor avec taille, âge, sexe ; sinon 1 MET). */
+const INTENSITES = [
+  { k: 'legere', label: 'Légère', desc: 'longues pauses, charges faciles' },
+  { k: 'moderee', label: 'Modérée', desc: 'séance normale' },
+  { k: 'intense', label: 'Intense', desc: 'lourd ou à fond, pauses courtes' },
+];
+const METS = {
+  muscu: { legere: 3.5, moderee: 5.0, intense: 6.0 },   // 02054 · 02052 · 02050
+  sprint: { legere: 5.0, moderee: 7.0, intense: 8.0 },   // 02035 · 02210 · entre 02210 (7,0) et 02214 (11,0) car les récupérations sont longues
+};
+const profil = () => { const c = Store.data.config || {}; return { taille: parseNum(c.taille), naissance: parseNum(c.naissance), sexe: c.sexe || '' }; };
+const profilComplet = () => { const p = profil(); return !!(p.taille && p.naissance && p.sexe); };
+function poidsAu(date) {
+  const ms = measures().filter(m => m.poids > 0);
+  if (!ms.length) return null;
+  const avant = ms.filter(m => m.date <= date);
+  return (avant.length ? avant[avant.length - 1] : ms[0]).poids;
+}
+function repos(kg, date) { // métabolisme de repos en kcal/jour
+  const p = profil();
+  if (p.taille && p.naissance && p.sexe) { const age = fromISO(date).getFullYear() - p.naissance; return 10 * kg + 6.25 * p.taille - 5 * age + (p.sexe === 'F' ? -161 : 5); }
+  return 3.5 * kg / 200 * 1440;
+}
+function sessionKcal(s) {
+  const kg = poidsAu(s.date || todayISO()); if (!kg) return null;
+  const tpl = TPL[s.tpl] || TPL.libre;
+  const min = parseNum(s.duree) || tpl.duree || 60;
+  const met = METS[(s.cat || tpl.cat) === 'sprint' ? 'sprint' : 'muscu'][s.intensite || 'moderee'];
+  const total = met * 3.5 * kg / 200 * min;
+  return { total, active: Math.max(0, total - repos(kg, s.date || todayISO()) / 1440 * min), min, met, kg };
+}
+function runKcal(a) {
+  const kg = poidsAu(a.date), min = a.time > 0 ? a.time / 60 : 0;
+  if (a.kcal > 0) return { total: a.kcal, active: kg ? Math.max(0, a.kcal - repos(kg, a.date) / 1440 * min) : a.kcal, src: 'Strava' };
+  if (!kg || !(a.dist > 0) || !isRun(a.type)) return null;
+  const net = kg * (a.dist / 1000 + 0.0045 * (a.elev || 0));
+  const total = net + 0.0175 * kg * min;
+  return { total, active: Math.max(0, total - repos(kg, a.date) / 1440 * min), src: 'calcul' };
+}
+function kcalLine(d) {
+  const k = sessionKcal({ ...d, cat: (TPL[d.tpl] || TPL.libre).cat });
+  if (!k) return 'Ajoute ton poids dans l\'onglet Mesures pour estimer les calories de tes séances.';
+  const it = INTENSITES.find(i => i.k === (d.intensite || 'moderee'));
+  return `Estimation : ≈ ${fmt(k.total, 0)} kcal, dont ${fmt(k.active, 0)} actives · ${fmt(k.min, 0)} min, intensité ${it.label.toLowerCase()} (${it.desc})` + (profilComplet() ? '' : ' · complète ton profil dans Mesures pour plus de précision');
+}
 function sessionSummary(s) {
   const st = sessionStats(s);
   const parts = [`${st.ex} exo${st.ex > 1 ? 's' : ''}`, `${st.sets} série${st.sets > 1 ? 's' : ''}`];
   if (st.ton) parts.push(`${fmt(st.ton, 0)} kg soulevés`);
   if (st.dist) parts.push(`${fmt(st.dist, 0)} m de sprint`);
+  const k = sessionKcal(s); if (k) parts.push(`≈ ${fmt(k.total, 0)} kcal`);
   return parts.join(' · ');
 }
 function fmtSet(kind, st) {
@@ -309,13 +358,13 @@ function newDraft(date, tplId) {
     ? prev.exercises.map(e => [e.name, e.kind, Math.max(1, (e.sets || []).length)])
     : tpl.ex;
   return {
-    id: null, date, tpl: tpl.id, title: tpl.title, cat: tpl.cat, notes: '',
+    id: null, date, tpl: tpl.id, title: tpl.title, cat: tpl.cat, notes: '', duree: String(tpl.duree || 60), intensite: 'moderee',
     exercises: list.map(([name, kind, n]) => ({ name, kind, sets: Array.from({ length: n }, () => ({ kg: '', reps: '', time: '' })) })),
   };
 }
 function draftFromSession(s) {
   return {
-    id: s.id, date: s.date, tpl: s.tpl || 'libre', title: s.title || (TPL[s.tpl] || TPL.libre).title, cat: s.cat || (TPL[s.tpl] || TPL.libre).cat, notes: s.notes || '',
+    id: s.id, date: s.date, tpl: s.tpl || 'libre', title: s.title || (TPL[s.tpl] || TPL.libre).title, cat: s.cat || (TPL[s.tpl] || TPL.libre).cat, notes: s.notes || '', duree: String(s.duree || (TPL[s.tpl] || TPL.libre).duree || 60), intensite: s.intensite || 'moderee',
     exercises: (s.exercises || []).map(e => ({ name: e.name, kind: e.kind, sets: (e.sets || []).map(st => ({ kg: st.kg != null ? String(st.kg) : '', reps: st.reps != null ? String(st.reps) : '', time: st.time != null ? String(st.time) : '' })) })),
   };
 }
@@ -471,6 +520,7 @@ function parseStravaCSV(text) {
   let iEl = idx(/^(elapsed time|temps ecoule|duree ecoulee|temps total)$/);
   let iDist = head.reduce((a, h, i) => (/^distance$/.test(h) && a.push(i), a), []);
   const iElev = idx(/^(elevation gain|denivele positif|gain d.?altitude|denivele)$/);
+  const iKcal = idx(/^(calories|kcal)$/);
   if (iDate < 0 && head.length >= 7) { iId = 0; iDate = 1; iName = 2; iType = 3; if (iEl < 0) iEl = 5; if (!iDist.length) iDist = [6]; }
   if (iDate < 0) throw new Error("ce fichier ne ressemble pas au activities.csv de Strava");
   const out = [];
@@ -484,7 +534,7 @@ function parseStravaCSV(text) {
     out.push({
       id: 'strava-' + String(sid || (date + '-' + norm(name))).replace(/[^A-Za-z0-9_.~:@+-]/g, '-'),
       sid: sid || null, date, name, type: iType >= 0 ? String(r[iType] || '') : '', dist, time,
-      elev: iElev >= 0 ? parseNum(r[iElev]) : null, src: 'strava',
+      elev: iElev >= 0 ? parseNum(r[iElev]) : null, kcal: iKcal >= 0 ? (parseNum(r[iKcal]) || null) : null, src: 'strava',
     });
   });
   return out;
@@ -537,6 +587,7 @@ VIEWS.semaine = () => {
   const wkRuns = rs.filter(r => r.date >= isos[0] && r.date <= isos[6]);
   const km = wkRuns.reduce((a, r) => a + (r.dist || 0), 0) / 1000;
   const ton = wkSes.reduce((a, s) => a + sessionStats(s).ton, 0);
+  const kcalWk = wkSes.reduce((a, s) => a + ((sessionKcal(s) || {}).total || 0), 0) + wkRuns.reduce((a, r) => a + ((runKcal(r) || {}).total || 0), 0);
   const lastW = latestMeasures().poids;
   const label = state.weekOffset === 0 ? 'Cette semaine' : state.weekOffset === -1 ? 'Semaine dernière' : state.weekOffset === 1 ? 'Semaine prochaine' : `Semaine ${isoWeek(base)}`;
   const wChip = lastW ? weighChip(lastW.date) : '<span class="chip warn">! Aucune pesée</span>';
@@ -554,7 +605,7 @@ VIEWS.semaine = () => {
       items += `<li><i class="pip" style="--c:${c.c}"></i><b>${esc(tpl.title)}</b><span class="muted">${esc(extra)}</span>${past ? '<span class="chip warn">! Pas notée</span>' : isToday ? '<span class="chip accent">Au programme</span>' : ''}</li>`;
     } else if (plan.rest) items += `<li><i class="pip" style="--c:var(--line)"></i><b>Repos</b></li>`;
     else if (plan.free && !dRuns.length) items += `<li><i class="pip" style="--c:var(--line)"></i><span class="muted">Libre</span></li>`;
-    if (dRuns.length) dRuns.forEach(r => { items += `<li><i class="pip" style="--c:var(--plate-green)"></i><b>Course</b><span class="num">${fmt((r.dist || 0) / 1000, 1)} km · ${fPace(r.time, r.dist)}</span>${r.src === 'strava' ? '<span class="chip">Strava</span>' : ''}</li>`; });
+    if (dRuns.length) dRuns.forEach(r => { items += `<li><i class="pip" style="--c:var(--plate-green)"></i><b>Course</b><span class="num">${fmt((r.dist || 0) / 1000, 1)} km · ${fPace(r.time, r.dist)}${(k => k ? ` · ≈ ${fmt(k.total, 0)} kcal` : '')(runKcal(r))}</span>${r.src === 'strava' ? '<span class="chip">Strava</span>' : ''}</li>`; });
     else if (plan.run) items += `<li><i class="pip" style="--c:var(--plate-green)"></i><span class="muted">Course prévue</span>${past ? '<span class="chip">Pas de course</span>' : ''}</li>`;
     const btn = done.length
       ? `<button class="btn small" data-action="edit-session" data-id="${esc(done[done.length - 1].id)}">Modifier</button>`
@@ -572,6 +623,7 @@ VIEWS.semaine = () => {
   <section class="tiles" aria-label="Résumé de la semaine">
     <div class="tile"><span class="label">Séances muscu et sprint</span><span class="value num">${wkSes.length} / ${PLANNED_SESSIONS}</span><span class="sub">prévues : lun, mar, mer, ven</span></div>
     <div class="tile"><span class="label">Course</span><span class="value">${fmt(km, 1)} km</span><span class="sub">${wkRuns.length} sortie${wkRuns.length > 1 ? 's' : ''} sur ${PLANNED_RUNS} prévues</span></div>
+    <div class="tile"><span class="label">Calories dépensées</span><span class="value">${kcalWk ? '≈ ' + fmt(kcalWk, 0) : '–'}</span><span class="sub">${kcalWk ? 'séances + courses (estimation)' : (poidsAu(todayISO()) ? 'aucune séance cette semaine' : 'ajoute ton poids dans Mesures')}</span></div>
     <div class="tile"><span class="label">Charge soulevée</span><span class="value">${fmt(ton, 0)} kg</span><span class="sub">séries × reps × kg</span></div>
     <div class="tile"><span class="label">Dernière pesée</span><span class="value">${lastW ? fmt(lastW.v, 1) + ' kg' : '–'}</span><span class="sub">${lastW ? esc(ago(lastW.date)) : ''} ${wChip}</span></div>
   </section>
@@ -624,6 +676,11 @@ VIEWS.seance = () => {
     <div class="card-head"><h2>${d.id ? 'Modifier la séance' : 'Noter une séance'}</h2>
       <label class="f" style="grid-auto-flow:column;align-items:center;gap:8px">Date <input type="date" id="f-date" data-draft="date" value="${esc(d.date)}"></label></div>
     <div class="tpls" role="group" aria-label="Type de séance">${tplChips}</div>
+    <div class="fgrid">
+      <label class="f">Durée (min)<input id="f-duree" data-draft="duree" inputmode="numeric" autocomplete="off" value="${esc(d.duree || '')}"></label>
+      <div class="f"><span>Intensité</span><div class="tpls" role="group" aria-label="Intensité">${INTENSITES.map(i => `<button class="tpl" data-action="pick-int" data-int="${i.k}" aria-pressed="${(d.intensite || 'moderee') === i.k}">${esc(i.label)}</button>`).join('')}</div></div>
+    </div>
+    <p class="muted" id="kcal-est" style="font-size:14px">${esc(kcalLine(d))}</p>
     ${exHtml || '<p class="empty">Ajoute ton premier exercice.</p>'}
     <div><button class="btn" data-action="add-ex">+ Ajouter un exercice</button></div>
     <label class="f">Notes (sensations, douleurs, matériel)<textarea id="f-notes" data-draft="notes">${esc(d.notes)}</textarea></label>
@@ -704,7 +761,7 @@ VIEWS.course = () => {
   const nSt = Object.keys(sData.items || {}).length;
   const lastImport = sData.lastImport ? new Date(sData.lastImport) : null;
   const stamp = d => esc(DF.dm.format(d)) + ' à ' + pad(d.getHours()) + 'h' + pad(d.getMinutes());
-  const rows = acts.slice(0, 40).map(a => `<tr><td>${esc(fWDM(a.date))}</td><td>${esc(a.name || 'Course')}${a.src === 'manuel' ? ' <span class="chip">à la main</span>' : ''}</td><td>${esc(typeLabel(a.type))}</td><td class="r">${a.dist ? fmt(a.dist / 1000, 2) + ' km' : '–'}</td><td class="r">${fDur(a.time)}</td><td class="r">${isRun(a.type) ? fPace(a.time, a.dist) : '–'}</td><td class="r">${a.src === 'manuel' ? `<button class="btn small ghost" data-action="del-run" data-id="${esc(a.id)}" data-confirm>Supprimer</button>` : ''}</td></tr>`).join('');
+  const rows = acts.slice(0, 40).map(a => `<tr><td>${esc(fWDM(a.date))}</td><td>${esc(a.name || 'Course')}${a.src === 'manuel' ? ' <span class="chip">à la main</span>' : ''}</td><td>${esc(typeLabel(a.type))}</td><td class="r">${a.dist ? fmt(a.dist / 1000, 2) + ' km' : '–'}</td><td class="r">${fDur(a.time)}</td><td class="r">${isRun(a.type) ? fPace(a.time, a.dist) : '–'}</td><td class="r">${(k => k ? (k.src === 'Strava' ? '' : '≈ ') + fmt(k.total, 0) : '–')(runKcal(a))}</td><td class="r">${a.src === 'manuel' ? `<button class="btn small ghost" data-action="del-run" data-id="${esc(a.id)}" data-confirm>Supprimer</button>` : ''}</td></tr>`).join('');
 
   return `
   <section class="card">
@@ -729,7 +786,7 @@ VIEWS.course = () => {
   <section class="card"><h2>Kilomètres par semaine</h2>
     ${km.some(w => w.y > 0) ? chartSlot({ type: 'bar', data: km, unit: 'km', digits: 1, h: 180, aria: 'Kilomètres de course par semaine' }) : '<p class="empty">Aucune course sur les 8 dernières semaines pour l\'instant.</p>'}</section>
   <section class="card"><h2>Activités</h2>
-    ${rows ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Nom</th><th>Type</th><th class="r">Distance</th><th class="r">Durée</th><th class="r">Allure</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : `<p class="empty">${Store.loaded ? 'Aucune activité pour le moment.' : 'Chargement…'}</p>`}
+    ${rows ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Nom</th><th>Type</th><th class="r">Distance</th><th class="r">Durée</th><th class="r">Allure</th><th class="r">kcal</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : `<p class="empty">${Store.loaded ? 'Aucune activité pour le moment.' : 'Chargement…'}</p>`}
   </section>
   <section class="card" id="run-form"><h2>Ajouter une course à la main</h2>
     <div class="fgrid">
@@ -759,6 +816,18 @@ VIEWS.mesures = () => {
     ${w ? `<div class="weigh"><span class="big">${fmt(w.v, 1)}<small>kg</small></span><span>${esc(fWDM(w.date))} · <b>${esc(ago(w.date))}</b></span>${weighChip(w.date)}</div>
       <p class="muted">${w.delta != null ? `Par rapport à la pesée d'avant : ${w.delta > 0 ? '+' : w.delta < 0 ? '−' : ''}${fmt(Math.abs(w.delta), 1)} kg.` : ''} Repère-toi : pèse-toi le matin à jeun, au moins une fois par semaine.</p>`
       : `<p class="empty">${Store.loaded ? 'Aucune pesée enregistrée. Remplis le formulaire ci-dessous.' : 'Chargement…'}</p>`}
+  </section>
+  <section class="card" id="profil-form">
+    <h2>Ton profil</h2>
+    <p class="muted">Sert à estimer tes calories : ton poids vient de ta dernière pesée.</p>
+    <div class="fgrid">
+      <label class="f">Taille (cm)<input id="p-taille" inputmode="numeric" value="${esc(profil().taille || '')}" placeholder="180"></label>
+      <label class="f">Année de naissance<input id="p-naissance" inputmode="numeric" value="${esc(profil().naissance || '')}" placeholder="2002"></label>
+      <label class="f">Sexe<select id="p-sexe"><option value="">–</option><option value="H"${profil().sexe === 'H' ? ' selected' : ''}>Homme</option><option value="F"${profil().sexe === 'F' ? ' selected' : ''}>Femme</option></select></label>
+    </div>
+    <div class="actions"><button class="btn" data-action="save-profil">Enregistrer le profil</button></div>
+    ${(() => { const kg = poidsAu(t); if (!kg) return '<p class="muted" style="font-size:14px">Ajoute une pesée pour voir ton métabolisme de repos.</p>'; return `<p style="font-size:15px">Métabolisme de repos : <b>≈ ${fmt(repos(kg, t), 0)} kcal/jour</b>${profilComplet() ? '' : ' (calcul simplifié, complète ton profil)'}. Une séance de muscu modérée d'une heure ≈ <b>${fmt(5 * 3.5 * kg / 200 * 60, 0)} kcal</b>.</p>`; })()}
+    <p class="muted" style="font-size:13.5px">Estimations à ±20 % environ : valeurs MET du Compendium des activités physiques 2024, équation ACSM pour la course, formule de Mifflin-St Jeor pour le repos.</p>
   </section>
   <section class="card" id="measure-form">
     <h2>Nouvelle prise de mesures</h2>
@@ -857,6 +926,7 @@ const actions = {
     else if (!state.draft || state.draft.id || !draftDirty()) { state.draft = newDraft(date, tpl); saveDraft(); }
     go('seance');
   },
+  'pick-int': b => { state.draft.intensite = b.dataset.int; saveDraft(); render(); },
   'pick-tpl': b => {
     if (draftDirty() && !b.classList.contains('armed')) { arm(b, 'Remplacer la séance en cours ?'); return; }
     const d = state.draft; state.draft = { ...newDraft(d.date, b.dataset.tpl), id: d.id }; saveDraft(); render();
@@ -888,7 +958,7 @@ const actions = {
     if (!exercises.length) { toast('Remplis au moins une série (kg et reps).'); return; }
     const tpl = TPL[d.tpl] || TPL.libre;
     const id = d.id || uid('s');
-    const body = { date: d.date, tpl: tpl.id, title: tpl.title, cat: tpl.cat, exercises, notes: d.notes.trim(), savedAt: Date.now() };
+    const body = { date: d.date, tpl: tpl.id, title: tpl.title, cat: tpl.cat, exercises, notes: d.notes.trim(), duree: parseNum(d.duree) || tpl.duree || 60, intensite: d.intensite || 'moderee', savedAt: Date.now() };
     b.disabled = true;
     try {
       await Store.put('seances', id, body);
@@ -928,6 +998,14 @@ const actions = {
     catch (e) { b.disabled = false; toast('Pas enregistré : ' + dbErr(e)); }
   },
   'del-run': async b => { try { await Store.remove('courses', b.dataset.id); toast('Course supprimée.'); } catch (e) { toast('Suppression impossible : ' + dbErr(e)); } },
+  'save-profil': async () => {
+    const taille = parseNum($('#p-taille').value), naissance = parseNum($('#p-naissance').value), sexe = $('#p-sexe').value;
+    if (taille != null && !(taille > 100 && taille < 250)) { toast('Taille en cm, entre 100 et 250.'); return; }
+    const an = new Date().getFullYear();
+    if (naissance != null && !(naissance > an - 100 && naissance < an - 10)) { toast('Année de naissance invalide.'); return; }
+    await Store.putDoc('config', { ...Store.data.config, taille: taille || null, naissance: naissance || null, sexe: sexe || null });
+    toast('Profil enregistré.'); render();
+  },
   'save-measure': async b => {
     const date = $('#m-date').value; if (!date) { toast('Choisis une date.'); return; }
     const body = { date, savedAt: Date.now() }; let n = 0;
@@ -949,6 +1027,7 @@ document.addEventListener('input', e => {
   if (t.dataset.f != null && d) { const s = d.exercises[+t.dataset.ex] && d.exercises[+t.dataset.ex].sets[+t.dataset.set]; if (s) { s[t.dataset.f] = t.value; saveDraft(); } }
   else if (t.dataset.exName != null && d) { d.exercises[+t.dataset.exName].name = t.value; saveDraft(); }
   else if (t.dataset.draft === 'notes' && d) { d.notes = t.value; saveDraft(); }
+  else if (t.dataset.draft === 'duree' && d) { d.duree = t.value; saveDraft(); const el = $('#kcal-est'); if (el) el.textContent = kcalLine(d); }
 });
 document.addEventListener('change', async e => {
   const t = e.target, d = state.draft;
