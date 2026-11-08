@@ -2,7 +2,7 @@
 
 Site perso de suivi sport : programme de la semaine, séances (kg × reps), progrès et objectif bench 100 kg, course (import Strava) et mensurations.
 
-**Lien du site :** https://julien-vnr.github.io/carnet/
+**Lien du site :** https://julien-vnr.github.io/Carnet/
 
 ## Les fichiers
 
@@ -19,7 +19,7 @@ Le site y accède avec un jeton GitHub (fine-grained token) enregistré **seulem
 
 ## Modifier le site avec VS Code
 
-1. Récupérer le projet : `git clone https://github.com/julien-vnr/carnet.git`
+1. Récupérer le projet : `git clone https://github.com/julien-vnr/Carnet.git`
 2. Ouvrir le dossier `carnet` dans VS Code et modifier les fichiers.
 3. Tester : ouvrir `index.html` dans le navigateur (ou utiliser l'extension *Live Server*).
 4. Envoyer : onglet *Source Control* → écrire un message → *Commit* → *Sync Changes*.
