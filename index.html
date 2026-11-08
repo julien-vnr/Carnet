@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#BF3A21">
+<title>Carnet d'entraînement</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Big+Shoulders+Display:wght@700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+<header class="top">
+  <div class="track" aria-hidden="true"></div>
+  <div class="top-in">
+    <h1>Carnet d'entraînement</h1>
+    <a class="status" id="store-status" href="#reglages"><span class="dot"></span><span>Chargement…</span></a>
+  </div>
+  <nav class="tabs" aria-label="Sections">
+    <a href="#semaine" id="tab-semaine"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg><span>Semaine</span></a>
+    <a href="#seance" id="tab-seance"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 6v12M17.5 6v12M3 9v6M21 9v6M6.5 12h11"/></svg><span>Séance</span></a>
+    <a href="#progres" id="tab-progres"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg><span>Progrès</span></a>
+    <a href="#course" id="tab-course"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="18" r="2"/><circle cx="18" cy="6" r="2"/><path d="M8 18h7a3 3 0 0 0 0-6H9a3 3 0 0 1 0-6h7"/></svg><span>Course</span></a>
+    <a href="#mesures" id="tab-mesures"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="8" width="20" height="8" rx="1.5"/><path d="M6 8v3M10 8v4M14 8v3M18 8v4"/></svg><span>Mesures</span></a>
+  </nav>
+</header>
+<main id="view" aria-live="polite"></main>
+<div id="toast" role="status" aria-live="polite"></div>
+<noscript><p style="padding:16px">Active JavaScript pour utiliser le carnet.</p></noscript>
+
+</body>
+</html>
