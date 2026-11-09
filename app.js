@@ -97,21 +97,27 @@ const b64encode = s => { const bytes = new TextEncoder().encode(s); let bin = ''
 const b64decode = b => { const bin = atob(String(b).replace(/\s/g, '')); return new TextDecoder().decode(Uint8Array.from(bin, ch => ch.charCodeAt(0))); };
 
 async function gh(url, opts = {}, token = cfg().token) {
-  return fetch(url, { cache: 'no-store', ...opts, headers: { Accept: 'application/vnd.github+json', Authorization: 'Bearer ' + token, ...(opts.headers || {}) } });
+  const headers = { Accept: 'application/vnd.github+json', ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(opts.headers || {}) };
+  return fetch(url, { cache: 'no-store', ...opts, headers });
 }
 async function httpErr(r) { let m = ''; try { m = (await r.json()).message || ''; } catch { /* vide */ } const e = new Error(m || 'HTTP ' + r.status); e.status = r.status; return e; }
-async function ghGet() {
+async function ghGet(token = cfg().token) {
   const c = cfg(), url = apiUrl(c);
-  const r = await gh(url);
+  const r = await gh(url, {}, token);
+  if (!token && (r.status === 403 || r.status === 429)) { // limite de requêtes sans jeton : copie brute du fichier
+    const raw = await fetch(`https://raw.githubusercontent.com/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}/HEAD/${c.path}`, { cache: 'no-store' });
+    if (!raw.ok) throw await httpErr(raw);
+    return { data: normalize(JSON.parse(await raw.text())), sha: null };
+  }
   if (r.status === 404) {
-    const rr = await gh(`https://api.github.com/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}`);
+    const rr = await gh(`https://api.github.com/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}`, {}, token);
     if (rr.ok) return { data: EMPTY(), sha: null }; // dépôt OK, fichier pas encore créé
     throw await httpErr(rr);
   }
   if (!r.ok) throw await httpErr(r);
   const j = await r.json();
   let text = j.content ? b64decode(j.content) : '';
-  if (!text && j.size) { const raw = await gh(url, { headers: { Accept: 'application/vnd.github.raw' } }); if (!raw.ok) throw await httpErr(raw); text = await raw.text(); }
+  if (!text && j.size) { const raw = await gh(url, { headers: { Accept: 'application/vnd.github.raw' } }, token); if (!raw.ok) throw await httpErr(raw); text = await raw.text(); }
   return { data: normalize(text ? JSON.parse(text) : {}), sha: j.sha };
 }
 async function ghPut(data, sha, message) {
@@ -138,6 +144,7 @@ function commitMessage(ops) {
   return parts.slice(0, 3).join(', ') + (parts.length > 3 ? '…' : '');
 }
 function syncErrText(e) {
+  if (e && e.readonly) return e.message;
   if (!e || !e.status) return "Pas de réseau : tes modifications restent sur cet appareil et partiront dès que la connexion revient.";
   if (e.status === 401) return 'Jeton GitHub refusé (expiré ou mal copié). Mets-en un nouveau dans les réglages.';
   if (e.status === 403) return /rate limit/i.test(e.message) ? 'GitHub limite les requêtes pour le moment. Réessaie dans quelques minutes.' : "Ton jeton n'a pas le droit d'écrire : il lui faut la permission « Contents : Read and write » sur carnet-data.";
@@ -154,13 +161,25 @@ const Store = {
     if (cache && cache.data) { this.remote = normalize(cache.data); this.sha = cache.sha || null; this.lastSync = cache.at || null; }
     this.pending = lsGet(LS_PENDING) || [];
     this.rebuild();
-    if (!cfg().token) { this.mode = 'notoken'; changed(); return; }
     this.pull();
+  },
+  async pullPublic() { // sans jeton : lecture seule, si le dépôt de données est public
+    if (this.syncing) return;
+    this.syncing = true; changed();
+    try {
+      const { data, sha } = await ghGet('');
+      this.remote = data; this.sha = sha; this.lastSync = Date.now(); this.error = ''; this.mode = 'readonly';
+      this.rebuild(); this.saveLocal();
+    } catch (e) {
+      if (e.status === 404 || e.status === 401) { this.mode = 'notoken'; this.error = ''; }
+      else { this.mode = 'readonly'; this.error = syncErrText(e); }
+    }
+    this.syncing = false; changed();
   },
   rebuild() { const d = clone(this.remote); this.pending.forEach(op => applyOp(d, op)); this.data = d; },
   saveLocal() { lsSet(LS_PENDING, this.pending); lsSet(LS_CACHE, { data: this.remote, sha: this.sha, at: this.lastSync }); },
   async pull() {
-    if (!cfg().token) { this.mode = 'notoken'; changed(); return; }
+    if (!cfg().token) return this.pullPublic();
     if (this.syncing) return;
     this.syncing = true; changed();
     try {
@@ -191,14 +210,16 @@ const Store = {
     this.syncing = false; changed();
     if (this.pending.length && this.mode === 'ok') this.flush();
   },
-  enqueue(op) { this.pending.push(op); applyOp(this.data, op); this.saveLocal(); changed(); this.flush(); },
+  enqueue(op) {
+    if (this.mode === 'readonly') throw Object.assign(new Error('carnet en lecture seule, ajoute ton jeton dans les réglages'), { readonly: true });
+    this.pending.push(op); applyOp(this.data, op); this.saveLocal(); changed(); this.flush(); },
   get loaded() { return this.mode !== 'loading'; },
   async put(c, id, obj) { const b = { ...obj }; delete b.id; this.enqueue({ t: 'put', c, id, b }); },
   async remove(c, id) { this.enqueue({ t: 'del', c, id }); },
   async putDoc(k, b) { this.enqueue({ t: 'doc', k, b: { ...b } }); },
 };
 window.addEventListener('online', () => Store.pull());
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && cfg().token && (!Store.lastSync || Date.now() - Store.lastSync > 60000)) Store.pull(); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && (!Store.lastSync || Date.now() - Store.lastSync > 60000)) Store.pull(); });
 
 /* ---------- Données dérivées ---------- */
 const sessions = () => Object.values(Store.data.seances).filter(s => s && s.date).sort((a, b) => a.date === b.date ? (a.savedAt || 0) - (b.savedAt || 0) : a.date < b.date ? -1 : 1);
@@ -722,7 +743,7 @@ VIEWS.progres = () => {
   return `
   <section class="card bench">
     <div class="card-head"><h2>Objectif bench</h2>
-      <label class="inline-goal" for="goal-input">Objectif <input id="goal-input" inputmode="decimal" value="${esc(fmt(goal, 2))}" data-goal> kg</label></div>
+      <label class="inline-goal" for="goal-input">Objectif <input id="goal-input" inputmode="decimal" value="${esc(fmt(goal, 2))}" data-goal${Store.mode === 'readonly' ? ' readonly' : ''}> kg</label></div>
     <div class="bench-figs">
       <div><span class="muted">Meilleure barre</span><b>${best ? fmt(best) + ' kg' : '–'}</b><span class="muted">${b.bestLift ? `× ${fmt(b.bestLift.reps, 0)} · ${esc(fDM(b.bestLift.date))}` : 'pas encore notée'}</span></div>
       <div><span class="muted">1RM estimé</span><b>${b.bestE1 ? fmt(b.bestE1.v) + ' kg' : '–'}</b><span class="muted">${b.bestE1 ? `d'après ${fmt(b.bestE1.kg)} × ${fmt(b.bestE1.reps, 0)}` : 'Epley : kg × (1 + reps/30)'}</span></div>
@@ -767,6 +788,7 @@ VIEWS.course = () => {
   <section class="card">
     <div class="card-head"><h2>Strava</h2>${nSt ? `<span class="chip ok">✓ ${nSt} activité${nSt > 1 ? 's' : ''}</span>` : '<span class="chip">Rien d\'importé</span>'}</div>
     <p>${nSt ? `${nSt} activité${nSt > 1 ? 's' : ''} Strava dans ton carnet${lastImport ? ' · dernier import le ' + stamp(lastImport) : ''}.` : 'Récupère gratuitement toutes tes courses Strava grâce à l\'export de ton compte.'}</p>
+    <div class="strava-import edit-only">
     <h3>Import gratuit</h3>
     <ol class="steps">
       <li>Sur strava.com : photo de profil → <b>Paramètres</b> → <b>Mon compte</b> → <b>Télécharger ou supprimer votre compte</b> → <b>Demander votre archive</b>.</li>
@@ -776,6 +798,7 @@ VIEWS.course = () => {
     <label class="f" for="strava-file">Fichier d'export Strava (.zip ou activities.csv)<input type="file" id="strava-file" accept=".zip,.csv,text/csv,application/zip" data-import${Imp.busy ? ' disabled' : ''}></label>
     ${Imp.msg ? `<p class="strava-msg">${esc(Imp.msg)}</p>` : ''}
     <p class="muted" style="font-size:14px">La synchro automatique avec Strava est réservée aux abonnés Strava. Entre deux imports, ajoute tes nouvelles courses à la main en bas de page : au prochain import, une course notée à la main le même jour avec la même distance est remplacée par celle de Strava.</p>
+    </div>
   </section>
   <section class="tiles">
     <div class="tile"><span class="label">Cette semaine</span><span class="value">${fmt(thisWeek.y, 1)} km</span><span class="sub">${esc(thisWeek.title.split(' · ')[1])} · objectif ${PLANNED_RUNS}</span></div>
@@ -882,7 +905,8 @@ const view = $('#view');
 function storeStatus() {
   const el = $('#store-status'); let cls = '', txt = '';
   const n = Store.pending.length;
-  if (Store.mode === 'notoken') { cls = 'warn'; txt = n ? `${n} modif sur cet appareil · relie GitHub` : 'Relie tes données GitHub'; }
+  if (Store.mode === 'readonly') { txt = Store.error ? 'Lecture seule · données peut-être pas à jour' : 'Lecture seule'; }
+  else if (Store.mode === 'notoken') { cls = 'warn'; txt = n ? `${n} modif sur cet appareil · relie GitHub` : 'Relie tes données GitHub'; }
   else if (Store.syncing) txt = n ? 'Envoi vers GitHub…' : 'Synchronisation…';
   else if (Store.mode === 'loading') txt = 'Chargement…';
   else if (Store.mode === 'offline') { cls = 'warn'; txt = n ? `Hors ligne · ${n} modif en attente` : 'Hors ligne · données de cet appareil'; }
@@ -895,7 +919,10 @@ function render() {
   charts.length = 0;
   const banner = Store.mode === 'notoken' && state.tab !== 'reglages'
     ? `<section class="card banner"><b>Dernière étape : relier le site à ton dépôt carnet-data.</b><p>Tant que ce n'est pas fait, ce que tu notes reste seulement sur cet appareil.</p><div><a class="btn primary" href="#reglages">Ouvrir les réglages</a></div></section>` : '';
-  view.innerHTML = banner + VIEWS[state.tab]();
+  const ro = Store.mode === 'readonly' && state.tab !== 'reglages'
+    ? `<section class="card banner ro"><p><b>Carnet en lecture seule.</b> Tu peux tout consulter, sans pouvoir modifier. <a href="#reglages">C'est ton carnet ?</a></p></section>` : '';
+  document.body.classList.toggle('readonly', Store.mode === 'readonly');
+  view.innerHTML = banner + ro + VIEWS[state.tab]();
   document.querySelectorAll('.tabs a').forEach(a => a.setAttribute('aria-current', a.getAttribute('href').slice(1) === state.tab ? 'page' : 'false'));
   storeStatus();
   drawCharts();

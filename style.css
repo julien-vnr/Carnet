@@ -217,3 +217,9 @@ details.raw pre { white-space: pre-wrap; word-break: break-word; font-size: 12px
 
 .banner { border-color: var(--accent); box-shadow: inset 4px 0 0 var(--accent); }
 code { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: .92em; background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
+
+/* Lecture seule (lien partagé sans jeton) : on masque tout ce qui modifie */
+.banner.ro { box-shadow: none; border-color: var(--line); background: var(--surface-2); }
+body.readonly #seance-form, body.readonly #run-form, body.readonly #measure-form, body.readonly #profil-form,
+body.readonly .edit-only, body.readonly [data-action="log"], body.readonly [data-action="edit-session"],
+body.readonly [data-action^="del-"] { display: none !important; }

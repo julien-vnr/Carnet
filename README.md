@@ -14,8 +14,13 @@ Site perso de suivi sport : programme de la semaine, séances (kg × reps), prog
 
 ## Où sont mes données ?
 
-Dans le dépôt **privé** `carnet-data`, fichier `carnet.json`. Chaque enregistrement fait un commit, donc tout l'historique est gardé.
+Dans le dépôt `carnet-data`, fichier `carnet.json`. Chaque enregistrement fait un commit, donc tout l'historique est gardé.
 Le site y accède avec un jeton GitHub (fine-grained token) enregistré **seulement dans le navigateur** de chaque appareil (page Réglages du site). Le jeton ne doit jamais être mis dans ce dépôt.
+
+## Partager le carnet en lecture seule
+
+Si le dépôt `carnet-data` est **public**, toute personne qui ouvre le lien du site sans jeton voit tes données en **lecture seule** (rien de modifiable).
+Sur tes appareils où le jeton est enregistré, tu gardes la modification.
 
 ## Modifier le site avec VS Code
 
